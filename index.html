@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Study Planner</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        .card { border: 1px solid #ccc; padding: 15px; margin: 10px; border-radius: 10px; display:inline-block; }
+        .hidden { display:none; }
+        button { margin-top:10px; padding:5px 10px; cursor:pointer; }
+    </style>
+</head>
+
+<body>
+
+<h2>📘 Study Planner Input</h2>
+
+<div id="inputPage">
+    Name: <input id="name"><br><br>
+    Daily Study Hours: <input id="hours" type="number"><br><br>
+
+    <h3>Subjects</h3>
+    <div id="subjectsInput"></div>
+
+    <button onclick="addSubject()">Add Subject</button><br><br>
+    <button onclick="goDashboard()">Go to Dashboard</button>
+</div>
+
+
+<!-- DASHBOARD -->
+<div id="dashboard" class="hidden">
+    <h2>📊 Dashboard</h2>
+    <div id="subjectCards"></div>
+
+    <button onclick="showPlanner()">📅 Generate Study Plan</button>
+</div>
+
+
+<!-- SUBJECT PAGE -->
+<div id="subjectPage" class="hidden">
+    <h2 id="subjectTitle"></h2>
+    <div id="chaptersList"></div>
+    <button onclick="backDashboard()">⬅ Back</button>
+</div>
+
+
+<!-- PLANNER PAGE -->
+<div id="plannerPage" class="hidden">
+    <h2>📈 Progress</h2>
+    <canvas id="progressChart" width="200"></canvas>
+
+    <h3>📊 Preparation Table</h3>
+    <table border="1" id="prepTable">
+        <tr>
+            <th>Subject</th>
+            <th>Exam Date</th>
+            <th>Completed %</th>
+        </tr>
+    </table>
+
+    <h3>📅 Study Planner</h3>
+    <table border="1" id="planTable">
+        <tr>
+            <th>Date</th>
+            <th>Subject</th>
+            <th>Chapter</th>
+            <th>Hours</th>
+        </tr>
+    </table>
+
+    <button onclick="backDashboard()">⬅ Back</button>
+</div>
+
+
+<script>
+
+let studentData = {
+    name: "",
+    hours: 0,
+    subjects: []
+};
+
+// ➕ Add subject
+function addSubject() {
+    let div = document.createElement("div");
+    div.innerHTML = `
+        <br>
+        Subject Name: <input class="subName">
+        Exam Date: <input type="date" class="examDate">
+        Chapters (comma separated): <input class="chapters">
+    `;
+    document.getElementById("subjectsInput").appendChild(div);
+}
+
+// 🚀 Go dashboard
+function goDashboard() {
+    studentData.name = document.getElementById("name").value;
+    studentData.hours = parseFloat(document.getElementById("hours").value);
+
+    let names = document.getElementsByClassName("subName");
+    let dates = document.getElementsByClassName("examDate");
+    let chapters = document.getElementsByClassName("chapters");
+
+    studentData.subjects = [];
+
+    for(let i=0;i<names.length;i++){
+        let chList = chapters[i].value.split(",");
+
+        studentData.subjects.push({
+            name: names[i].value,
+            exam: dates[i].value,
+            chapters: chList.map(c => ({name:c.trim(), done:false}))
+        });
+    }
+
+    document.getElementById("inputPage").classList.add("hidden");
+    document.getElementById("dashboard").classList.remove("hidden");
+
+    loadDashboard();
+}
+
+// 📊 Load cards
+function loadDashboard(){
+    let div = document.getElementById("subjectCards");
+    div.innerHTML = "";
+
+    studentData.subjects.forEach((sub, index)=>{
+        let card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+            <h3>${sub.name}</h3>
+            <button onclick="openSubject(${index})">Open</button>
+        `;
+        div.appendChild(card);
+    });
+}
+
+// 📖 open subject
+function openSubject(i){
+    let sub = studentData.subjects[i];
+
+    document.getElementById("dashboard").classList.add("hidden");
+    document.getElementById("subjectPage").classList.remove("hidden");
+
+    document.getElementById("subjectTitle").innerText = sub.name;
+
+    let list = document.getElementById("chaptersList");
+    list.innerHTML = "";
+
+    sub.chapters.forEach((ch, idx)=>{
+        let div = document.createElement("div");
+        div.innerHTML = `
+            <input type="checkbox" ${ch.done ? "checked":""} 
+            onchange="markDone(${i},${idx},this.checked)">
+            ${ch.name}
+        `;
+        list.appendChild(div);
+    });
+}
+
+// ✔ mark done
+function markDone(si, ci, val){
+    studentData.subjects[si].chapters[ci].done = val;
+}
+
+// 🔙 back
+function backDashboard(){
+    document.getElementById("subjectPage").classList.add("hidden");
+    document.getElementById("plannerPage").classList.add("hidden");
+    document.getElementById("dashboard").classList.remove("hidden");
+}
+
+
+// 🚀 CALL FLASK API
+function showPlanner(){
+
+    fetch("/generate_plan", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(studentData)
+    })
+    .then(res => res.json())
+    .then(plan => {
+
+        document.getElementById("dashboard").classList.add("hidden");
+        document.getElementById("plannerPage").classList.remove("hidden");
+
+        generateProgress();
+        fillPlanTable(plan);
+        generatePrepTable();
+
+    })
+    .catch(err => {
+        alert("Error generating plan");
+        console.log(err);
+    });
+}
+
+
+// 📊 progress chart
+function generateProgress(){
+    let total=0, done=0;
+
+    studentData.subjects.forEach(s=>{
+        total += s.chapters.length;
+        done += s.chapters.filter(c=>c.done).length;
+    });
+
+    let percent = total === 0 ? 0 : Math.round((done/total)*100);
+
+    new Chart(document.getElementById("progressChart"), {
+        type: 'pie',
+        data: {
+            labels: ["Completed", "Remaining"],
+            datasets: [{
+                data: [percent, 100-percent]
+            }]
+        }
+    });
+}
+
+// 📅 Fill plan table from Flask
+function fillPlanTable(plan){
+    let table = document.getElementById("planTable");
+
+    table.innerHTML = `
+        <tr>
+            <th>Date</th>
+            <th>Subject</th>
+            <th>Chapter</th>
+            <th>Hours</th>
+        </tr>
+    `;
+
+    plan.forEach(p=>{
+        table.innerHTML += `
+            <tr>
+                <td>${p.Date}</td>
+                <td>${p.Subject}</td>
+                <td>${p.Chapter}</td>
+                <td>${p.Hours}</td>
+            </tr>
+        `;
+    });
+}
+
+// 📊 preparation table
+function generatePrepTable(){
+    let prep = document.getElementById("prepTable");
+
+    prep.innerHTML = `
+        <tr>
+            <th>Subject</th>
+            <th>Exam Date</th>
+            <th>Completed %</th>
+        </tr>
+    `;
+
+    studentData.subjects.forEach(s=>{
+        let done = s.chapters.filter(c=>c.done).length;
+        let percent = Math.round((done/s.chapters.length)*100);
+
+        prep.innerHTML += `
+            <tr>
+                <td>${s.name}</td>
+                <td>${s.exam}</td>
+                <td>${percent}%</td>
+            </tr>
+        `;
+    });
+}
+
+</script>
+
+</body>
+</html>
